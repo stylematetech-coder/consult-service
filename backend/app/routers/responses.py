@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from ..db import is_same_local_day, responses_col, schemas_col, utc_now_iso
+from ..notify import notify_form_submitted
 
 router = APIRouter()
 
@@ -14,11 +15,17 @@ router = APIRouter()
 # 這裡是後端這層再擋一次，避免有人繞過前端直接打 API。
 PHONE_PATTERN = re.compile(r"^09\d{8}$")
 
+# LINE userId 格式（U + 32 個十六進位字元）。這個值從表單網址的 ?uid= 帶進來，
+# 用途是讓 LINE bot 那側把「填完表單」對回正確的聊天室；它是「識別」不是「認證」
+# （query string 可被改），所以格式不對就當作沒有，不因此擋掉整張表單。
+LINE_UID_PATTERN = re.compile(r"^U[0-9a-f]{32}$")
+
 
 class CreateResponseBody(BaseModel):
     name: str = Field(min_length=1)
     phone: str = Field(min_length=1)
     gender: str = Field(min_length=1)
+    line_uid: str | None = None
 
     @field_validator("phone")
     @classmethod
@@ -27,6 +34,14 @@ class CreateResponseBody(BaseModel):
         if not PHONE_PATTERN.match(v):
             raise ValueError("手機號碼格式不正確，需為 09 開頭的 10 碼數字")
         return v
+
+    @field_validator("line_uid")
+    @classmethod
+    def validate_line_uid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v if LINE_UID_PATTERN.match(v) else None
 
 
 class PatchAnswersBody(BaseModel):
@@ -47,6 +62,7 @@ def _doc_to_response(doc: dict, include_answers: bool = True) -> dict:
         "name": doc["name"],
         "phone": doc["phone"],
         "gender": doc["gender"],
+        "line_uid": doc.get("line_uid"),
         "status": doc["status"],
         "created_at": doc["created_at"],
         "submitted_at": doc.get("submitted_at"),
@@ -76,10 +92,12 @@ def create_response(body: CreateResponseBody):
     # 重複紀錄；隔天再來就當作是新的一次諮詢，不會撈到昨天以前放棄的草稿。
     draft = responses_col.find_one({"phone": body.phone, "status": "in_progress"}, sort=[("_id", -1)])
     if draft and is_same_local_day(draft["created_at"], now):
-        responses_col.update_one(
-            {"_id": draft["_id"]},
-            {"$set": {"name": name, "gender": gender, "answers.gender": gender}},
-        )
+        update = {"name": name, "gender": gender, "answers.gender": gender}
+        # 這次是從 LINE 連結進來的話，把 uid 補記到既有草稿上（第一次可能是
+        # 直接開網址、沒帶 uid）；沒帶就保留原值，不要把已知的 uid 洗掉。
+        if body.line_uid:
+            update["line_uid"] = body.line_uid
+        responses_col.update_one({"_id": draft["_id"]}, {"$set": update})
         doc = responses_col.find_one({"_id": draft["_id"]})
         result = _doc_to_response(doc)
         result["resumed"] = True
@@ -96,6 +114,7 @@ def create_response(body: CreateResponseBody):
         "name": name,
         "phone": body.phone,
         "gender": gender,
+        "line_uid": body.line_uid,
         "status": "in_progress",
         "answers": initial_answers,
         "created_at": utc_now_iso(),
@@ -135,6 +154,15 @@ def submit_response(response_id: str):
         {"$set": {"status": "submitted", "submitted_at": utc_now_iso()}},
     )
     doc = responses_col.find_one({"_id": oid})
+
+    # If this form came from a LINE chat (has line_uid), tell the bot so it can
+    # continue the booking in LINE. Best-effort: never let it break submit.
+    try:
+        schema = schemas_col.find_one({"_id": _parse_object_id(doc["schema_id"])})
+        notify_form_submitted(doc, (schema or {}).get("steps", []))
+    except Exception:  # noqa: BLE001
+        pass
+
     return {"response": _doc_to_response(doc)}
 
 

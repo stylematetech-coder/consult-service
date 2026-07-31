@@ -68,10 +68,13 @@ export const api = {
 
   getSchema: (id: string) => request<{ schema: QuestionnaireSchema }>(`/schema/${id}`),
 
-  createResponse: (name: string, phone: string, gender: Gender) =>
+  // lineUid：從 LINE 聊天室的預約按鈕開啟時，網址會帶 ?uid=<LINE userId>，
+  // 隨建檔寫進資料庫，讓 LINE bot 能把「填完表單」對回正確的聊天室。
+  // 直接開網址（沒有 uid）也照常運作。
+  createResponse: (name: string, phone: string, gender: Gender, lineUid?: string | null) =>
     request<{ response: CreateResponseResult }>("/responses", {
       method: "POST",
-      body: JSON.stringify({ name, phone, gender }),
+      body: JSON.stringify({ name, phone, gender, line_uid: lineUid ?? null }),
     }),
 
   patchAnswers: (id: string, answers: Answers) =>

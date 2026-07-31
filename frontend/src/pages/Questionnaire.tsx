@@ -71,7 +71,9 @@ export function Questionnaire() {
     }
     setIntroError(null);
     try {
-      const res = await api.createResponse(name.trim(), phone, gender);
+      // LINE 進來的連結帶 ?uid=<LINE userId>；一般直開網址則為 null
+      const lineUid = new URLSearchParams(window.location.search).get("uid");
+      const res = await api.createResponse(name.trim(), phone, gender, lineUid);
       setResponseId(res.response.id);
       setAnswers(res.response.answers);
       setShowPrefillNote(res.response.prefilled);
