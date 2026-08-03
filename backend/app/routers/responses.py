@@ -82,46 +82,57 @@ def create_response(body: CreateResponseBody):
     gender = body.gender.strip()
     now = datetime.now(timezone.utc)
 
+    # 每支電話只保留一筆(2026-08-03 起，不再累積歷史紀錄)：existing 是這支
+    # 電話目前唯一的一筆(不論狀態是 in_progress 還是 submitted)，下面每個
+    # 分支都圍繞著它更新，不會再對同一支電話 insert 出第二筆文件。
+    existing = responses_col.find_one({"phone": body.phone}, sort=[("_id", -1)])
+
     # 防呆：同一支電話不能對應到不同姓名，避免打錯號碼、或號碼被不同的人拿來填寫
-    # 造成資料錯亂。用這支電話最近一筆紀錄的姓名當作這支號碼「已登記」的姓名比對。
-    latest_for_phone = responses_col.find_one({"phone": body.phone}, sort=[("_id", -1)])
-    if latest_for_phone and latest_for_phone["name"] != name:
+    # 造成資料錯亂。用這支電話僅有那筆紀錄的姓名當作這支號碼「已登記」的姓名比對。
+    if existing and existing["name"] != name:
         raise HTTPException(status_code=409, detail="此號碼已經註冊")
 
-    # 同一天內同一支電話如果還有沒填完的草稿，接著用同一筆，不要疊出一堆填一半的
-    # 重複紀錄；隔天再來就當作是新的一次諮詢，不會撈到昨天以前放棄的草稿。
-    draft = responses_col.find_one({"phone": body.phone, "status": "in_progress"}, sort=[("_id", -1)])
-    if draft and is_same_local_day(draft["created_at"], now):
+    # 同一天內同一支電話如果還有沒填完的草稿，接著用同一筆；隔天再來就當作是
+    # 新的一次諮詢，不會撈到昨天以前放棄的草稿。
+    if existing and existing["status"] == "in_progress" and is_same_local_day(existing["created_at"], now):
         update = {"name": name, "gender": gender, "answers.gender": gender}
         # 這次是從 LINE 連結進來的話，把 uid 補記到既有草稿上（第一次可能是
         # 直接開網址、沒帶 uid）；沒帶就保留原值，不要把已知的 uid 洗掉。
         if body.line_uid:
             update["line_uid"] = body.line_uid
-        responses_col.update_one({"_id": draft["_id"]}, {"$set": update})
-        doc = responses_col.find_one({"_id": draft["_id"]})
+        responses_col.update_one({"_id": existing["_id"]}, {"$set": update})
+        doc = responses_col.find_one({"_id": existing["_id"]})
         result = _doc_to_response(doc)
         result["resumed"] = True
         result["prefilled"] = False
         return {"response": result}
 
-    # 沒有可以接著填的草稿，找這支電話最近一次「已送出」的資料，把答案帶過來當
-    # 這次的初始值，讓顧客直接在上面修改，不用每次都從空白重新填一遍。
-    prior = responses_col.find_one({"phone": body.phone, "status": "submitted"}, sort=[("submitted_at", -1)])
+    # 沒有可以接著填的草稿。如果這支電話僅有的那一筆是「已送出」，把答案帶過來
+    # 當這次的初始值，讓顧客直接在上面修改，不用每次都從空白重新填一遍；接著
+    # 用這次的內容覆蓋掉那一筆（有既有紀錄就更新，沒有才新增），不留舊資料。
+    prior = existing if existing and existing["status"] == "submitted" else None
     initial_answers = {**prior["answers"], "gender": gender} if prior else {"gender": gender}
+    # uid 沒帶就沿用既有紀錄上的值，不要把已知的 uid 洗掉。
+    line_uid = body.line_uid or (existing.get("line_uid") if existing else None)
 
-    doc = {
+    fields = {
         "schema_id": str(active["_id"]),
         "name": name,
         "phone": body.phone,
         "gender": gender,
-        "line_uid": body.line_uid,
+        "line_uid": line_uid,
         "status": "in_progress",
         "answers": initial_answers,
         "created_at": utc_now_iso(),
         "submitted_at": None,
     }
-    insert_result = responses_col.insert_one(doc)
-    doc["_id"] = insert_result.inserted_id
+    if existing:
+        responses_col.update_one({"_id": existing["_id"]}, {"$set": fields})
+        doc = {**fields, "_id": existing["_id"]}
+    else:
+        insert_result = responses_col.insert_one(fields)
+        doc = {**fields, "_id": insert_result.inserted_id}
+
     result = _doc_to_response(doc)
     result["resumed"] = False
     result["prefilled"] = prior is not None

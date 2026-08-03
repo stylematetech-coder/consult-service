@@ -20,7 +20,13 @@ _db = _client[MONGO_DB_NAME]
 schemas_col: Collection = _db["questionnaire_schemas"]
 responses_col: Collection = _db["responses"]
 
-responses_col.create_index("phone")
+# unique=True (2026-08-03): one response document per phone number, period —
+# no history is kept, each new submission overwrites the prior one for that
+# phone (see routers/responses.py create_response). This constraint is the
+# DB-level backstop against a race (two concurrent submits for the same
+# phone both seeing no existing doc and both inserting) slipping past the
+# application-level upsert logic.
+responses_col.create_index("phone", unique=True)
 
 
 def utc_now_iso() -> str:
