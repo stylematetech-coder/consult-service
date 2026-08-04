@@ -21,6 +21,11 @@ export interface ResponseSummary {
   status: "in_progress" | "submitted";
   created_at: string;
   submitted_at: string | null;
+  // 2026-08-04：這張表單描述的需求是否已經被排進行事曆。unscheduled 直到
+  // agent 幫忙約成功(booked_datetime 才會有值)；預約被取消又會退回
+  // unscheduled。in_progress 的草稿一律是 unscheduled，還沒有「需求」可談。
+  booking_status: "unscheduled" | "scheduled";
+  booked_datetime: string | null;
 }
 
 export interface ResponseRecord extends ResponseSummary {
@@ -88,6 +93,10 @@ export const api = {
 
   listResponses: (phone: string) =>
     request<{ responses: ResponseSummary[] }>(`/responses?phone=${encodeURIComponent(phone)}`),
+
+  // 客人自己的表單列表(依 line_uid,不是 phone)——「我的表單」儀表板用。
+  listMine: (lineUid: string) =>
+    request<{ responses: ResponseSummary[] }>(`/responses/mine?line_uid=${encodeURIComponent(lineUid)}`),
 
   getResponse: (id: string) => request<{ response: ResponseRecord }>(`/responses/${id}`),
 };

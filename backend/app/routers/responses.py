@@ -66,6 +66,13 @@ def _doc_to_response(doc: dict, include_answers: bool = True) -> dict:
         "status": doc["status"],
         "created_at": doc["created_at"],
         "submitted_at": doc.get("submitted_at"),
+        # 2026-08-04:這張表單描述的需求是否已經被排進行事曆。預設
+        # unscheduled，agent 呼叫 calendar_create 成功後才會標成 scheduled；
+        # 之後那筆預約被取消(calendar_delete)又會標回 unscheduled——見
+        # PATCH /responses/{id}/booking。
+        "booking_status": doc.get("booking_status", "unscheduled"),
+        "booked_datetime": doc.get("booked_datetime"),
+        "booked_event_id": doc.get("booked_event_id"),
     }
     if include_answers:
         data["answers"] = doc.get("answers", {})
@@ -74,6 +81,14 @@ def _doc_to_response(doc: dict, include_answers: bool = True) -> dict:
 
 @router.post("/responses", status_code=201)
 def create_response(body: CreateResponseBody):
+    """Start a new form. One customer (one line_uid) can hold MANY of these
+    over time (2026-08-03 product decision, reversing the same-day's earlier
+    "one per phone" experiment) — different visits are different needs
+    (剪髮 today, 染髮 next month), so each new form is its own document,
+    never an overwrite of a prior one. `line_uid` is what scopes "which forms
+    are this customer's" for the dashboard (GET /responses/mine) — phone is
+    NOT unique and is not an identity boundary (see db.py).
+    """
     active = schemas_col.find_one({"is_active": True}, sort=[("_id", -1)])
     if active is None:
         raise HTTPException(status_code=500, detail="No active questionnaire schema configured")
@@ -82,57 +97,50 @@ def create_response(body: CreateResponseBody):
     gender = body.gender.strip()
     now = datetime.now(timezone.utc)
 
-    # 每支電話只保留一筆(2026-08-03 起，不再累積歷史紀錄)：existing 是這支
-    # 電話目前唯一的一筆(不論狀態是 in_progress 還是 submitted)，下面每個
-    # 分支都圍繞著它更新，不會再對同一支電話 insert 出第二筆文件。
-    existing = responses_col.find_one({"phone": body.phone}, sort=[("_id", -1)])
-
-    # 防呆：同一支電話不能對應到不同姓名，避免打錯號碼、或號碼被不同的人拿來填寫
-    # 造成資料錯亂。用這支電話僅有那筆紀錄的姓名當作這支號碼「已登記」的姓名比對。
-    if existing and existing["name"] != name:
-        raise HTTPException(status_code=409, detail="此號碼已經註冊")
-
-    # 同一天內同一支電話如果還有沒填完的草稿，接著用同一筆；隔天再來就當作是
-    # 新的一次諮詢，不會撈到昨天以前放棄的草稿。
-    if existing and existing["status"] == "in_progress" and is_same_local_day(existing["created_at"], now):
+    # 同一位客人(同一個 line_uid)當天如果還有沒填完的草稿,接著用同一筆,不要
+    # 疊出一堆填一半的重複紀錄;隔天再來就當作是新的一次諮詢。沒有 line_uid
+    # (理論上不該發生,新流程一律透過帶 uid 的連結進來)就不做這個接續判斷,
+    # 每次都當新的一筆。
+    draft = None
+    if body.line_uid:
+        draft = responses_col.find_one(
+            {"line_uid": body.line_uid, "status": "in_progress"}, sort=[("_id", -1)]
+        )
+    if draft and is_same_local_day(draft["created_at"], now):
         update = {"name": name, "gender": gender, "answers.gender": gender}
-        # 這次是從 LINE 連結進來的話，把 uid 補記到既有草稿上（第一次可能是
-        # 直接開網址、沒帶 uid）；沒帶就保留原值，不要把已知的 uid 洗掉。
-        if body.line_uid:
-            update["line_uid"] = body.line_uid
-        responses_col.update_one({"_id": existing["_id"]}, {"$set": update})
-        doc = responses_col.find_one({"_id": existing["_id"]})
+        responses_col.update_one({"_id": draft["_id"]}, {"$set": update})
+        doc = responses_col.find_one({"_id": draft["_id"]})
         result = _doc_to_response(doc)
         result["resumed"] = True
         result["prefilled"] = False
         return {"response": result}
 
-    # 沒有可以接著填的草稿。如果這支電話僅有的那一筆是「已送出」，把答案帶過來
-    # 當這次的初始值，讓顧客直接在上面修改，不用每次都從空白重新填一遍；接著
-    # 用這次的內容覆蓋掉那一筆（有既有紀錄就更新，沒有才新增），不留舊資料。
-    prior = existing if existing and existing["status"] == "submitted" else None
+    # 新的一次填寫。把這位客人(同一個 line_uid)最近一次「已送出」的答案帶過來
+    # 當初始值,讓顧客直接在上面修改,不用每次都從空白重新填一遍——這只是預填
+    # 方便,不是同一筆紀錄,送出後是獨立的新文件。
+    prior = None
+    if body.line_uid:
+        prior = responses_col.find_one(
+            {"line_uid": body.line_uid, "status": "submitted"}, sort=[("submitted_at", -1)]
+        )
     initial_answers = {**prior["answers"], "gender": gender} if prior else {"gender": gender}
-    # uid 沒帶就沿用既有紀錄上的值，不要把已知的 uid 洗掉。
-    line_uid = body.line_uid or (existing.get("line_uid") if existing else None)
 
-    fields = {
+    doc = {
         "schema_id": str(active["_id"]),
         "name": name,
         "phone": body.phone,
         "gender": gender,
-        "line_uid": line_uid,
+        "line_uid": body.line_uid,
         "status": "in_progress",
         "answers": initial_answers,
         "created_at": utc_now_iso(),
         "submitted_at": None,
+        "booking_status": "unscheduled",
+        "booked_datetime": None,
+        "booked_event_id": None,
     }
-    if existing:
-        responses_col.update_one({"_id": existing["_id"]}, {"$set": fields})
-        doc = {**fields, "_id": existing["_id"]}
-    else:
-        insert_result = responses_col.insert_one(fields)
-        doc = {**fields, "_id": insert_result.inserted_id}
-
+    insert_result = responses_col.insert_one(doc)
+    doc["_id"] = insert_result.inserted_id
     result = _doc_to_response(doc)
     result["resumed"] = False
     result["prefilled"] = prior is not None
@@ -183,6 +191,18 @@ def submit_response(response_id: str):
 @router.get("/responses")
 def list_responses(phone: str):
     docs = responses_col.find({"phone": phone.strip()}).sort("created_at", -1)
+    return {"responses": [_doc_to_response(doc, include_answers=False) for doc in docs]}
+
+
+# 一定要放在 `/responses/{response_id}` 之前註冊：Starlette 依註冊順序比對路由，
+# 放後面的話 "/responses/mine" 會先被 {response_id} 那個路由吃掉("mine" 被當成
+# id，ObjectId 解析失敗變成 404)。
+@router.get("/responses/mine")
+def list_my_responses(line_uid: str):
+    """這位客人(同一個 line_uid)自己的表單列表，給客人自己的「我的表單」
+    儀表板用——依 line_uid 篩選，不是 phone，客人只看得到自己曾經開過的表單。
+    """
+    docs = responses_col.find({"line_uid": line_uid.strip()}).sort("created_at", -1)
     return {"responses": [_doc_to_response(doc, include_answers=False) for doc in docs]}
 
 

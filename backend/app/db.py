@@ -20,13 +20,15 @@ _db = _client[MONGO_DB_NAME]
 schemas_col: Collection = _db["questionnaire_schemas"]
 responses_col: Collection = _db["responses"]
 
-# unique=True (2026-08-03): one response document per phone number, period —
-# no history is kept, each new submission overwrites the prior one for that
-# phone (see routers/responses.py create_response). This constraint is the
-# DB-level backstop against a race (two concurrent submits for the same
-# phone both seeing no existing doc and both inserting) slipping past the
-# application-level upsert logic.
-responses_col.create_index("phone", unique=True)
+# 2026-08-03 下午推翻同日上午的決定:一支電話/一個客人可以有多筆表單(不同天
+# 做不同服務),所以 phone 不再是唯一鍵——一人多筆是常態,不是例外。索引留著
+# (非唯一)純粹是給「設計師查詢」那支依電話查詢的效能用。真正拿來分辨「這些
+# 表單是不是同一位客人的」是 line_uid,不是 phone(電話是客人自己講的話,任何
+# 人都講得出別人的電話;line_uid 是 LINE 平台驗證過的身分)。
+responses_col.create_index("phone")
+# 給「我的表單」列表頁(GET /responses/mine)用,同樣非唯一——一個 line_uid
+# 本來就會對應多筆表單。
+responses_col.create_index("line_uid")
 
 
 def utc_now_iso() -> str:

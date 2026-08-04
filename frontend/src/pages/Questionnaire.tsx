@@ -1,5 +1,6 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { api, type Gender, type QuestionnaireSchema } from "../api/client";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, type QuestionnaireSchema } from "../api/client";
 import {
   type Answers,
   computeVisibleSteps,
@@ -8,24 +9,24 @@ import {
   otherAnswerKey,
   resolveOptions,
 } from "../lib/engine";
-import { isValidPhone, PHONE_FORMAT_HINT, sanitizePhoneInput } from "../lib/phone";
 
-type Phase = "intro" | "form" | "submitted";
+type Phase = "loading" | "form" | "submitted";
 
-const GENDER_OPTIONS: { value: Gender; label: string }[] = [
-  { value: "male", label: "男生" },
-  { value: "female", label: "女生" },
-];
-
+// 姓名/電話/性別的收集與「建立表單」這個動作，都移到 MyForms.tsx 的入口
+// 流程去做了(2026-08-04 調整：客人要先打完姓名電話、才看得到/建得了表單，
+// 不是先看列表、點 + 才問)。這裡只負責「續填一筆已經存在的表單」，一律
+// 透過 /edit/:id 進來，記錄本身(含姓名/電話/性別)已經在建立當下就有了。
 export function Questionnaire() {
+  const { id: editId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const lineUidParam = new URLSearchParams(window.location.search).get("uid");
+
   const [schema, setSchema] = useState<QuestionnaireSchema | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [phase, setPhase] = useState<Phase>("intro");
+  const [phase, setPhase] = useState<Phase>("loading");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [gender, setGender] = useState<Gender | null>(null);
-  const [introError, setIntroError] = useState<string | null>(null);
 
   const [responseId, setResponseId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Answers>({});
@@ -43,6 +44,34 @@ export function Questionnaire() {
       .catch(() => setLoadError("無法載入問卷題目，請確認後端服務是否已啟動。"));
   }, []);
 
+  // 載入這筆既有草稿：直接跳進 "form" 階段(姓名/電話/性別在建立當下就已經
+  // 有了，不用重問)。萬一這筆其實已經送出(理論上「我的表單」只會把
+  // in_progress 導來這裡，但直接打網址仍可能碰到)，改導去唯讀的檢視頁，
+  // 不要讓客人以為還能用這個表單流程去改一筆已經定案的紀錄。
+  useEffect(() => {
+    if (!editId) {
+      setLoadError("缺少表單編號，請從「我的表單」重新進入。");
+      return;
+    }
+    api
+      .getResponse(editId)
+      .then((res) => {
+        if (res.response.status === "submitted") {
+          navigate(`/lookup/${editId}`, { replace: true });
+          return;
+        }
+        setName(res.response.name);
+        setPhone(res.response.phone);
+        setResponseId(res.response.id);
+        setAnswers(res.response.answers);
+        // MyForms 剛建立這筆時如果帶了上次送出的答案當初始值，會在導過來的
+        // 網址加上 prefilled=1；這裡只是讀出來顯示提示文字，不影響資料本身。
+        setShowPrefillNote(new URLSearchParams(window.location.search).get("prefilled") === "1");
+        setPhase("form");
+      })
+      .catch(() => setLoadError("找不到這筆表單，可能已經被刪除。"));
+  }, [editId, navigate]);
+
   // allSteps 含 info 型別（例如接髮技術建議），只給摘要顯示用；
   // interactiveSteps 才是顧客實際會逐題作答、拿來算「第 x / y 題」的清單。
   const allSteps = useMemo(() => (schema ? computeVisibleSteps(schema.steps, answers) : []), [schema, answers]);
@@ -57,30 +86,6 @@ export function Questionnaire() {
     api.patchAnswers(responseId, nextAnswers).catch(() => {
       /* 現場自填情境下，autosave 失敗先靜默重試下一次操作即可，不打斷填寫流程 */
     });
-  }
-
-  async function handleIntroSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!name.trim() || !phone.trim() || !gender) {
-      setIntroError("請填寫姓名、手機號碼，並選擇性別");
-      return;
-    }
-    if (!isValidPhone(phone)) {
-      setIntroError(`手機號碼格式不正確，請輸入${PHONE_FORMAT_HINT}`);
-      return;
-    }
-    setIntroError(null);
-    try {
-      // LINE 進來的連結帶 ?uid=<LINE userId>；一般直開網址則為 null
-      const lineUid = new URLSearchParams(window.location.search).get("uid");
-      const res = await api.createResponse(name.trim(), phone, gender, lineUid);
-      setResponseId(res.response.id);
-      setAnswers(res.response.answers);
-      setShowPrefillNote(res.response.prefilled);
-      setPhase("form");
-    } catch (err) {
-      setIntroError(err instanceof Error ? err.message : "建立問卷失敗，請稍後再試一次");
-    }
   }
 
   function selectSingleAndAdvance(stepId: string, value: string) {
@@ -138,19 +143,6 @@ export function Questionnaire() {
     }
   }
 
-  function restart() {
-    clearTimeout(advanceTimer.current);
-    clearTimeout(patchTimer.current);
-    setName("");
-    setPhone("");
-    setGender(null);
-    setResponseId(null);
-    setAnswers({});
-    setCurrentIndex(0);
-    setShowPrefillNote(false);
-    setPhase("intro");
-  }
-
   if (loadError) {
     return (
       <div className="page">
@@ -159,57 +151,10 @@ export function Questionnaire() {
     );
   }
 
-  if (!schema) {
+  if (!schema || phase === "loading") {
     return (
       <div className="page">
         <div className="card">載入中…</div>
-      </div>
-    );
-  }
-
-  if (phase === "intro") {
-    return (
-      <div className="page">
-        <div className="card">
-          <div className="title">髮型預約問卷</div>
-          <div className="subtitle">請先留下您的姓名、手機號碼與性別</div>
-          <form onSubmit={handleIntroSubmit}>
-            {introError && <div className="error-text">{introError}</div>}
-            <input
-              className="field-input"
-              placeholder="姓名"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <input
-              className="field-input"
-              type="tel"
-              inputMode="numeric"
-              maxLength={10}
-              placeholder="手機號碼（0912345678）"
-              value={phone}
-              onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))}
-            />
-            <div className="options-row" style={{ marginBottom: 20 }}>
-              {GENDER_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={gender === opt.value ? "option-btn selected" : "option-btn"}
-                  onClick={() => setGender(opt.value)}
-                >
-                  <span>{opt.label}</span>
-                  {gender === opt.value && <span>✓</span>}
-                </button>
-              ))}
-            </div>
-            <div className="actions">
-              <button type="submit" className="btn-primary">
-                開始填寫
-              </button>
-            </div>
-          </form>
-        </div>
       </div>
     );
   }
@@ -220,8 +165,14 @@ export function Questionnaire() {
         <div className="card thanks">
           <div className="title">感謝您的填寫</div>
           <div className="subtitle">您的諮詢資料已送出，設計師將依此為您規劃專屬方案。</div>
-          <button type="button" className="btn-primary" onClick={restart}>
-            返回首頁
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() =>
+              navigate(lineUidParam ? `/?uid=${encodeURIComponent(lineUidParam)}` : "/")
+            }
+          >
+            返回我的表單
           </button>
         </div>
       </div>

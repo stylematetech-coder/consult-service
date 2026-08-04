@@ -247,6 +247,16 @@
   color: #8c4a3a;
 }
 
+.status-scheduled {
+  background: #e3ecf6;
+  color: #35578c;
+}
+
+.status-unscheduled {
+  background: #f1ede4;
+  color: #7a6a58;
+}
+
 .error-text {
   color: #b3392a;
   font-size: 13px;
