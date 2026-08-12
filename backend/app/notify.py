@@ -123,6 +123,7 @@ def notify_form_submitted(doc: dict, steps: list[dict]) -> None:
         "tenant": os.environ.get("LINEBOT_TENANT", "default"),
         "name": doc.get("name"),
         "phone": doc.get("phone"),
+        "gender": doc.get("gender"),
         "service": service,
         "summary": summary,
     }

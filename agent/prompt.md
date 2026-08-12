@@ -43,7 +43,7 @@
 - dye「染髮」
 - perm「燙髮」
 - scalpcare「護頭皮」
-- haircare「護頭髮」
+- haircare「護髮」
 - cut「剪髮」
 
 ### 2. p0（多選，showIf: services 包含 "perm"）

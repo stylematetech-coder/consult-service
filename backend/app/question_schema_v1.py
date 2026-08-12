@@ -22,7 +22,7 @@ SCHEMA_V1 = {
                 {"value": "dye", "label": "染髮"},
                 {"value": "perm", "label": "燙髮"},
                 {"value": "scalpcare", "label": "護頭皮"},
-                {"value": "haircare", "label": "護頭髮"},
+                {"value": "haircare", "label": "護髮"},
                 {"value": "cut", "label": "剪髮"},
             ],
         },
@@ -38,6 +38,7 @@ SCHEMA_V1 = {
             "options": [
                 {"value": "curl", "label": "燙捲"},
                 {"value": "straight", "label": "縮毛矯正"},
+                {"value": "onsite", "label": "待現場評估"},
             ],
             "showIf": {"field": "services", "includes": "perm"},
         },
@@ -54,7 +55,7 @@ SCHEMA_V1 = {
             "showIf": {"anyOf": [{"field": "services", "includes": s} for s in HAIR_LEN_SERVICES]},
         },
         # 染／燙共用：這兩邊原本都各問一次「一年內是否有漂髮經驗」，合併成一題只問一次，
-        # 避免同時選染髮＋燙髮時被重複詢問。護頭髮不問這題（改成髮況裡的「長期染燙」勾選項）。
+        # 避免同時選染髮＋燙髮時被重複詢問。護髮不問這題（改成髮況裡的「長期染燙」勾選項）。
         {
             "id": "bleachHistory",
             "type": "single",
@@ -193,7 +194,7 @@ SCHEMA_V1 = {
             "otherValue": "other",
             "showIf": {"field": "services", "includes": "scalpcare"},
         },
-        # 護頭髮
+        # 護髮
         {
             "id": "hc1",
             "type": "multi",
