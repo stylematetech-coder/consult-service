@@ -42,7 +42,7 @@
 - extension「接髮」— **僅當 gender == male 才提供這個選項**，女性顧客不要提
 - dye「染髮」
 - perm「燙髮」
-- scalpcare「護頭皮」
+- scalpcare「頭皮護理」
 - haircare「護髮」
 - cut「剪髮」
 

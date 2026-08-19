@@ -4,7 +4,7 @@
 規則引擎見前端 src/lib/engine.ts，兩邊邏輯需保持一致。
 """
 
-HAIR_LEN_SERVICES = ["dye", "perm", "cut", "haircare"]  # 髮長只在染/燙/剪/護髮需要問，接髮跟護頭皮不算
+HAIR_LEN_SERVICES = ["dye", "perm", "cut", "haircare"]  # 髮長只在染/燙/剪/護髮需要問，接髮跟頭皮護理不算
 
 SCHEMA_V1 = {
     "version": "v1",
@@ -21,7 +21,7 @@ SCHEMA_V1 = {
                 {"value": "extension", "label": "接髮", "showIf": {"field": "gender", "eq": "male"}},
                 {"value": "dye", "label": "染髮"},
                 {"value": "perm", "label": "燙髮"},
-                {"value": "scalpcare", "label": "護頭皮"},
+                {"value": "scalpcare", "label": "頭皮護理"},
                 {"value": "haircare", "label": "護髮"},
                 {"value": "cut", "label": "剪髮"},
             ],
@@ -177,7 +177,7 @@ SCHEMA_V1 = {
             "note": "預期顏色僅供設計師參考，實際狀況仍依現場判斷，可能會增加其他項目費用，EX:漂髮。",
             "showIf": {"field": "services", "includes": "dye"},
         },
-        # 護頭皮
+        # 頭皮護理
         {
             "id": "sc1",
             "type": "multi",
