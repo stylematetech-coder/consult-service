@@ -7,7 +7,7 @@
 HAIR_LEN_SERVICES = ["dye", "perm", "cut", "haircare"]  # 髮長只在染/燙/剪/護髮需要問，接髮跟頭皮護理不算
 
 SCHEMA_V1 = {
-    "version": "v1",
+    "version": "v2",
     "steps": [
         {
             "id": "services",
@@ -26,9 +26,38 @@ SCHEMA_V1 = {
                 {"value": "cut", "label": "剪髮"},
             ],
         },
+        # 接髮先分成首次接髮與接髮調整；只有首次接髮走原本 e1/e2 流程，調整則改問部位後結束接髮分支。
+        {
+            "id": "e0",
+            "type": "single",
+            "question": "請問您這次的接髮需求是？",
+            "summaryLabel": "接髮需求",
+            "options": [
+                {"value": "first", "label": "首次接髮"},
+                {"value": "adjustment", "label": "接髮調整"},
+            ],
+            "showIf": {"field": "services", "includes": "extension"},
+        },
         # 燙髮：燙捲／縮毛（可複選）挪到共用題（髮長、漂髮經驗）之前，一選完服務項目就先問。
         # 只選縮毛的話，直接視為要做縮毛矯正，不需要再問自然捲跟後面那題「是否需要進行縮毛矯正」；
         # 選了燙捲（不論是否同時選縮毛）才要走原本自然捲 -> 縮毛矯正的判斷流程（見下方 p1/p2）。
+        {
+            "id": "eAdjustArea",
+            "type": "single",
+            "question": "請問需要調整的部位是？",
+            "summaryLabel": "接髮調整部位",
+            "options": [
+                {"value": "forehead", "label": "前額"},
+                {"value": "top", "label": "頂部"},
+                {"value": "foreheadAndTop", "label": "前額+頂部"},
+            ],
+            "showIf": {
+                "allOf": [
+                    {"field": "services", "includes": "extension"},
+                    {"field": "e0", "eq": "adjustment"},
+                ]
+            },
+        },
         {
             "id": "p0",
             "type": "multi",
@@ -122,7 +151,12 @@ SCHEMA_V1 = {
                 {"value": "crown", "label": "地中海/頂部稀疏"},
                 {"value": "m", "label": "M型禿/髮際線高"},
             ],
-            "showIf": {"field": "services", "includes": "extension"},
+            "showIf": {
+                "allOf": [
+                    {"field": "services", "includes": "extension"},
+                    {"field": "e0", "eq": "first"},
+                ]
+            },
         },
         {
             # 接髮技術由設計師依禿頭類型判斷，不是顧客要作答的題目，
@@ -131,7 +165,12 @@ SCHEMA_V1 = {
             "type": "info",
             "question": "依禿頭類型，可參考的接髮技術（設計師參考用，非顧客選項）",
             "summaryLabel": "接髮技術建議（設計師參考）",
-            "showIf": {"field": "services", "includes": "extension"},
+            "showIf": {
+                "allOf": [
+                    {"field": "services", "includes": "extension"},
+                    {"field": "e0", "eq": "first"},
+                ]
+            },
             "optionsBySource": {
                 "source": "e1",
                 "map": {

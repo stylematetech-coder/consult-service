@@ -16,7 +16,7 @@ function Nav() {
 
 export default function App() {
   return (
-    <Router>
+    <Router basename="/form">
       <Nav />
       <Routes>
         <Route path="/" element={<MyForms />} />

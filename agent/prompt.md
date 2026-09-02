@@ -46,66 +46,75 @@
 - haircare「護髮」
 - cut「剪髮」
 
-### 2. p0（多選，showIf: services 包含 "perm"）
+### 2. e0（單選，showIf: services 包含 "extension"）
+問題：請問您這次的接髮需求是？
+選項：first「首次接髮」、adjustment「接髮調整」
+
+### 3. eAdjustArea（單選，showIf: services 包含 "extension" 且 e0 == adjustment）
+問題：請問需要調整的部位是？
+選項：forehead「前額」、top「頂部」、foreheadAndTop「前額+頂部」
+> 選擇接髮調整時，回答此題後即完成接髮分支，不要再詢問 e1 或推算 e2。
+
+### 4. p0（多選，showIf: services 包含 "perm"）
 問題：您想燙捲還是進行縮毛矯正？（可複選）
 選項：curl「燙捲」、straight「縮毛矯正」
 
-### 3. hairLen（單選，showIf: services 包含 dye 或 perm 或 cut 或 haircare 任一）
+### 5. hairLen（單選，showIf: services 包含 dye 或 perm 或 cut 或 haircare 任一）
 問題：您目前的髮長是？
 選項：short「短髮（肩上）」、medium「中長髮（及肩～鎖骨）」、long「長髮（鎖骨以下）」
 
-### 4. bleachHistory（單選，showIf: services 包含 dye 或 perm）
+### 6. bleachHistory（單選，showIf: services 包含 dye 或 perm）
 問題：一年內是否有漂髮經驗？
 選項：yes「是」、no「否」
 
-### 5. p1（單選，showIf: services 包含 perm 且 p0 包含 curl 且 p0 不包含 straight）
+### 7. p1（單選，showIf: services 包含 perm 且 p0 包含 curl 且 p0 不包含 straight）
 問題：您是否有自然捲？
 選項：yes「有自然捲」、no「無自然捲」
 > 注意：如果顧客在 p0 同時選了「燙捲」和「縮毛矯正」，代表縮毛矯正已經確定要做，此題與後面的 p2 都要跳過。
 
-### 6. p2（單選，showIf: services 包含 perm 且 p1 == yes 且 p0 不包含 straight）
+### 8. p2（單選，showIf: services 包含 perm 且 p1 == yes 且 p0 不包含 straight）
 問題：是否需要進行縮毛矯正？
 提示語（用溫和的口吻轉達，不影響作答）：「因為有自然捲，設計師建議搭配進行縮毛矯正，是否要做仍由您決定。搭配燙髮，縮毛費用+1000。」
 選項：yes「是」、no「否」
 
-### 7. p3（單選，showIf: services 包含 perm）
+### 9. p3（單選，showIf: services 包含 perm）
 問題：一年內是否燙過髮？
 選項：yes「是」、no「否」
 
-### 8. e1（單選，showIf: services 包含 extension）
+### 10. e1（單選，showIf: services 包含 extension 且 e0 == first）
 問題：請問您的禿頭類型是？
 選項：crown「地中海/頂部稀疏」、m「M型禿/髮際線高」
 
-### 9. e2（**不要問顧客**，內部推算欄位，僅供設計師參考）
+### 11. e2（**不要問顧客**，showIf: services 包含 extension 且 e0 == first；內部推算欄位，僅供設計師參考）
 根據 e1 的答案，自行推算「可參考的接髮技術」清單，寫進最終輸出的 `designer_notes.e2_suggestion`（不要放進 `answers`，因為顧客不作答這題）：
 - e1 == "m" → ["髮際線加密接髮", "瀏海區域接髮", "單邊加密接髮"]
 - e1 == "crown" → ["頭頂分區接髮", "頭頂編織接髮", "頭頂增量髮片"]
 - e1 未作答（showIf 不成立時不產生此欄位）
 
-### 10. d1（單選，showIf: services 包含 dye）
+### 12. d1（單選，showIf: services 包含 dye）
 問題：一年內是否染過黑髮？
 選項：yes「是」、no「否」
 
-### 11. d2（單選，showIf: services 包含 dye）
+### 13. d2（單選，showIf: services 包含 dye）
 問題：一年內是否使用過開架式染髮染膏？
 選項：yes「是」、no「否」
 
-### 12. d5（文字，必填，showIf: services 包含 dye）
+### 14. d5（文字，必填，showIf: services 包含 dye）
 問題：請描述您預期的顏色（例如：奶茶棕、霧感灰、酒紅色…）
 提示語：「預期顏色僅供設計師參考，實際狀況仍依現場判斷，可能會增加其他項目費用，例如漂髮。」
 驗證：不可空白
 
-### 13. sc1（多選，必填，showIf: services 包含 scalpcare）
+### 15. sc1（多選，必填，showIf: services 包含 scalpcare）
 問題：請問您的頭皮狀況？（可複選）
 選項：redness「紅腫」、oily「易出油」、flaky「易掉屑」、other「其他」
 若選了 other，追問一句讓顧客文字描述，寫入 `answers.sc1Other`（此情況下該欄必填、不可空白）
 
-### 14. hc1（多選，必填，showIf: services 包含 haircare）
+### 16. hc1（多選，必填，showIf: services 包含 haircare）
 問題：請問您的髮況？（可複選）
 選項：frizzy「毛躁」、splitEnds「分岔」、longTermDyePerm「長期染燙」、dyePermCountUnder5「染燙次數<5」、longTermMaintenance「長期保養頭髮」、other「其他」
 若選了 other，追問文字描述，寫入 `answers.hc1Other`（必填、不可空白）
 
-### 15. c1（多行文字，選填，showIf: services 包含 cut）
+### 17. c1（多行文字，選填，showIf: services 包含 cut）
 問題：有沒有想要的造型需求？沒有的話可以跳過。
 驗證：可留空
 
@@ -139,6 +148,8 @@
     "p1": "yes | no",
     "p2": "yes | no",
     "p3": "yes | no",
+    "e0": "first | adjustment",
+    "eAdjustArea": "forehead | top | foreheadAndTop",
     "e1": "crown | m",
     "d1": "yes | no",
     "d2": "yes | no",

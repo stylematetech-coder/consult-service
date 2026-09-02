@@ -85,6 +85,17 @@ def summarize(steps: list[dict], answers: dict) -> tuple[str | None, str]:
     return service, "\n".join(lines)
 
 
+def card_service_label(service: str | None, answers: dict) -> str | None:
+    """Return a card-only label while preserving the canonical category."""
+    if not service or "接髮" not in service:
+        return service
+    extension_type = {
+        "first": "首次接髮",
+        "adjustment": "接髮調整",
+    }.get(answers.get("e0"))
+    return service.replace("接髮", extension_type) if extension_type else service
+
+
 def _post(payload: dict) -> None:
     url = os.environ.get("LINEBOT_HOOK_URL", "").strip()
     token = os.environ.get("LINEBOT_HOOK_TOKEN", "").strip()
@@ -117,7 +128,8 @@ def notify_form_submitted(doc: dict, steps: list[dict]) -> None:
     line_uid = doc.get("line_uid")
     if not line_uid:
         return
-    service, summary = summarize(steps, doc.get("answers", {}))
+    answers = doc.get("answers", {})
+    service, summary = summarize(steps, answers)
     payload = {
         "line_uid": line_uid,
         "tenant": os.environ.get("LINEBOT_TENANT", "default"),
@@ -125,6 +137,7 @@ def notify_form_submitted(doc: dict, steps: list[dict]) -> None:
         "phone": doc.get("phone"),
         "gender": doc.get("gender"),
         "service": service,
+        "service_display": card_service_label(service, answers),
         "summary": summary,
     }
     threading.Thread(target=_post, args=(payload,), daemon=True).start()

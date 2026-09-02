@@ -41,7 +41,11 @@ def is_same_local_day(iso_str: str, reference: datetime) -> bool:
 
 
 def init_db() -> None:
-    if schemas_col.count_documents({}) == 0:
+    # Schema 是不可變版本：舊回覆仍透過 schema_id 查得到當時的題目；程式帶入新
+    # version 時才建立並切換 active，重啟同一版不會重複插入。
+    current = schemas_col.find_one({"version": SCHEMA_V1["version"]})
+    if current is None:
+        schemas_col.update_many({"is_active": True}, {"$set": {"is_active": False}})
         schemas_col.insert_one(
             {
                 "version": SCHEMA_V1["version"],
@@ -50,3 +54,6 @@ def init_db() -> None:
                 "created_at": utc_now_iso(),
             }
         )
+    elif not current.get("is_active"):
+        schemas_col.update_many({"is_active": True}, {"$set": {"is_active": False}})
+        schemas_col.update_one({"_id": current["_id"]}, {"$set": {"is_active": True}})
