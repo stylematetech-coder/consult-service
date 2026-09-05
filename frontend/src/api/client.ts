@@ -32,6 +32,13 @@ export interface ResponseRecord extends ResponseSummary {
   answers: Answers;
 }
 
+export interface BusinessHoursDay {
+  date: string; // "YYYY-MM-DD"
+  closed: boolean;
+  open_time: string | null;
+  close_time: string | null;
+}
+
 export interface CreateResponseResult extends ResponseRecord {
   // resumed：接續同一天內尚未填完的草稿；prefilled：帶入上次已送出問卷的答案當初始值。
   resumed: boolean;
@@ -99,4 +106,23 @@ export const api = {
     request<{ responses: ResponseSummary[] }>(`/responses/mine?line_uid=${encodeURIComponent(lineUid)}`),
 
   getResponse: (id: string) => request<{ response: ResponseRecord }>(`/responses/${id}`),
+
+  // 表單最後一步的「選預約時間」。yearMonth："YYYY-MM"，用來畫月曆、把
+  // calendar-service 沒營業的日期直接 disable。
+  getBusinessHours: (yearMonth: string) =>
+    request<{ days: BusinessHoursDay[] }>(`/availability/business-hours?year_month=${yearMonth}`),
+
+  // date："YYYY-MM-DD"；service 是這位顧客前面已選服務項目換算出的中文字串
+  // （例如 "染髮、燙髮"，跟 calendar-service 的六大服務類別同一套字）。
+  getSlots: (date: string, service: string, gender: Gender) =>
+    request<{ slots: string[] }>(
+      `/availability/slots?date_str=${date}&service=${encodeURIComponent(service)}&gender=${gender}`,
+    ),
+
+  // 選定日期/時間後呼叫，實際在 calendar-service 建立這筆預約。
+  createBooking: (id: string, date: string, time: string) =>
+    request<{ response: ResponseRecord }>(`/responses/${id}/booking`, {
+      method: "POST",
+      body: JSON.stringify({ date, time }),
+    }),
 };

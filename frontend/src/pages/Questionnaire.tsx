@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, type QuestionnaireSchema } from "../api/client";
+import { api, type BusinessHoursDay, type Gender, type QuestionnaireSchema } from "../api/client";
 import {
   type Answers,
   computeVisibleSteps,
@@ -11,6 +11,24 @@ import {
 } from "../lib/engine";
 
 type Phase = "loading" | "form" | "submitted";
+
+const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+
+function currentYearMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function addMonths(yearMonth: string, delta: number): string {
+  const [year, month] = yearMonth.split("-").map(Number);
+  const d = new Date(year, month - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function todayDateString(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 
 // 姓名/電話/性別的收集與「建立表單」這個動作，都移到 MyForms.tsx 的入口
 // 流程去做了(2026-08-04 調整：客人要先打完姓名電話、才看得到/建得了表單，
@@ -33,6 +51,18 @@ export function Questionnaire() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showPrefillNote, setShowPrefillNote] = useState(false);
+
+  // 表單最後一步的「選預約時間」——bookingDate/bookingTime 都選定後才會進到
+  // 摘要畫面；兩者分開存(不混進 answers)，因為這不是 schema 驅動的題目，是
+  // 直接打 calendar-service 資料串出來的獨立步驟。
+  const [viewMonth, setViewMonth] = useState(currentYearMonth);
+  const [businessDays, setBusinessDays] = useState<BusinessHoursDay[]>([]);
+  const [bookingDate, setBookingDate] = useState<string | null>(null);
+  const [bookingTime, setBookingTime] = useState<string | null>(null);
+  const [slots, setSlots] = useState<string[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
 
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const patchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -80,6 +110,49 @@ export function Questionnaire() {
   const idx = Math.min(currentIndex, total);
   const isSummary = idx >= total;
   const currentStep = isSummary ? null : interactiveSteps[idx];
+
+  // "services" 這題的答案換算成中文字串（例如 "染髮、燙髮"）——跟
+  // calendar-service 的六大服務類別是同一套字，估算時長/查可約時段都要用
+  // 這個字串，不是 answers.services 原本的英文 value 陣列。
+  const servicesStep = schema?.steps.find((s) => s.id === "services");
+  const serviceLabel = servicesStep ? formatAnswer(servicesStep, answers) : "";
+  const gender = (answers.gender as Gender | undefined) ?? "male";
+
+  const bookingConfirmed = Boolean(bookingDate && bookingTime);
+  const showBookingStep = isSummary && !bookingConfirmed;
+
+  useEffect(() => {
+    if (!showBookingStep) return;
+    api
+      .getBusinessHours(viewMonth)
+      .then((res) => setBusinessDays(res.days))
+      .catch(() => setBusinessDays([]));
+  }, [showBookingStep, viewMonth]);
+
+  useEffect(() => {
+    if (!showBookingStep || !bookingDate) {
+      setSlots([]);
+      return;
+    }
+    setSlotsLoading(true);
+    setBookingError(null);
+    api
+      .getSlots(bookingDate, serviceLabel, gender)
+      .then((res) => setSlots(res.slots))
+      .catch(() => setBookingError("無法取得可預約時段，請稍後再試"))
+      .finally(() => setSlotsLoading(false));
+  }, [showBookingStep, bookingDate, serviceLabel, gender]);
+
+  function selectBookingDate(date: string) {
+    setBookingDate(date);
+    setBookingTime(null);
+  }
+
+  function goBackFromBooking() {
+    setBookingDate(null);
+    setBookingTime(null);
+    goBack();
+  }
 
   function autosave(nextAnswers: Answers) {
     if (!responseId) return;
@@ -132,14 +205,27 @@ export function Questionnaire() {
   }
 
   async function handleSubmit() {
-    if (!responseId) return;
+    if (!responseId || !bookingDate || !bookingTime) return;
     setSubmitError(null);
+    setBookingSubmitting(true);
     try {
       await api.patchAnswers(responseId, answers);
+      await api.createBooking(responseId, bookingDate, bookingTime);
+    } catch (err) {
+      // 這個時段可能剛被約走、或已經不在營業時間內——回到選時間畫面，
+      // 重新抓一次可用時段，而不是讓顧客以為已經約成功了。
+      setBookingSubmitting(false);
+      setBookingTime(null);
+      setBookingError(err instanceof Error ? err.message : "預約失敗，請重新選擇時段");
+      return;
+    }
+    try {
       await api.submitResponse(responseId);
       setPhase("submitted");
     } catch {
       setSubmitError("送出失敗，請稍後再試一次");
+    } finally {
+      setBookingSubmitting(false);
     }
   }
 
@@ -179,12 +265,95 @@ export function Questionnaire() {
     );
   }
 
+  if (showBookingStep) {
+    const [viewYear, viewMonthNum] = viewMonth.split("-").map(Number);
+    const daysInMonth = new Date(viewYear, viewMonthNum, 0).getDate();
+    const leadingBlanks = new Date(viewYear, viewMonthNum - 1, 1).getDay();
+    const byDate = new Map(businessDays.map((d) => [d.date, d]));
+    const today = todayDateString();
+
+    return (
+      <div className="page">
+        <div className="card">
+          <div className="title">選擇預約時間</div>
+          <div className="subtitle">請選擇有營業的日期與可預約時段</div>
+
+          <div className="calendar-header">
+            <button type="button" className="btn-secondary" onClick={() => setViewMonth((m) => addMonths(m, -1))}>
+              ‹
+            </button>
+            <span>{viewYear} 年 {viewMonthNum} 月</span>
+            <button type="button" className="btn-secondary" onClick={() => setViewMonth((m) => addMonths(m, 1))}>
+              ›
+            </button>
+          </div>
+
+          <div className="calendar-grid">
+            {WEEKDAY_LABELS.map((w) => (
+              <div className="calendar-weekday" key={w}>{w}</div>
+            ))}
+            {Array.from({ length: leadingBlanks }).map((_, i) => (
+              <div key={`blank-${i}`} />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const dateStr = `${viewMonth}-${String(i + 1).padStart(2, "0")}`;
+              const info = byDate.get(dateStr);
+              const isPast = dateStr < today;
+              const disabled = isPast || !info || info.closed;
+              return (
+                <button
+                  key={dateStr}
+                  type="button"
+                  className={dateStr === bookingDate ? "calendar-day selected" : "calendar-day"}
+                  disabled={disabled}
+                  onClick={() => selectBookingDate(dateStr)}
+                >
+                  {i + 1}
+                </button>
+              );
+            })}
+          </div>
+
+          {bookingDate && (
+            <div className="slot-section">
+              <div className="question-sub">{bookingDate} 可預約時段</div>
+              {slotsLoading && <div className="question-note">載入中…</div>}
+              {!slotsLoading && slots.length === 0 && (
+                <div className="question-note">這天沒有可預約的時段了，請選別的日期。</div>
+              )}
+              <div className="slot-grid">
+                {slots.map((time) => (
+                  <button
+                    key={time}
+                    type="button"
+                    className={time === bookingTime ? "option-btn selected" : "option-btn"}
+                    onClick={() => setBookingTime(time)}
+                  >
+                    {time}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {bookingError && <div className="error-text">{bookingError}</div>}
+          <div className="actions">
+            <button type="button" className="btn-secondary" onClick={goBackFromBooking}>
+              上一步
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isSummary) {
     // info 型別（例如接髮技術建議）是給設計師參考用，不在顧客自己看的摘要頁顯示；
     // 這份資料仍會完整保留在後端，設計師查詢的明細頁看得到。
     const summaryList = [
       { label: "姓名", answer: name },
       { label: "手機號碼", answer: phone },
+      { label: "預約時間", answer: `${bookingDate} ${bookingTime}` },
       ...allSteps
         .filter((step) => step.type !== "info")
         .map((step) => ({
@@ -207,11 +376,11 @@ export function Questionnaire() {
           </div>
           {submitError && <div className="error-text">{submitError}</div>}
           <div className="actions">
-            <button type="button" className="btn-secondary" onClick={goBack}>
+            <button type="button" className="btn-secondary" onClick={() => setBookingTime(null)}>
               上一步
             </button>
-            <button type="button" className="btn-primary" onClick={handleSubmit}>
-              確認送出
+            <button type="button" className="btn-primary" disabled={bookingSubmitting} onClick={handleSubmit}>
+              {bookingSubmitting ? "送出中…" : "確認送出"}
             </button>
           </div>
         </div>

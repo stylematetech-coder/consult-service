@@ -6,7 +6,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from .db import init_db  # noqa: E402
-from .routers import responses, schema  # noqa: E402
+from .routers import availability, responses, schema  # noqa: E402
 
 app = FastAPI(title="consult-service")
 
@@ -21,6 +21,7 @@ init_db()
 
 app.include_router(schema.router)
 app.include_router(responses.router)
+app.include_router(availability.router)
 
 
 @app.get("/health")

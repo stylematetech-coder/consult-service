@@ -262,3 +262,73 @@
   font-size: 13px;
   margin-bottom: 12px;
 }
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.calendar-header .btn-secondary {
+  height: 36px;
+  width: 36px;
+  padding: 0;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 12px;
+  color: #7a6a58;
+  padding-bottom: 4px;
+}
+
+.calendar-day {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 1.5px solid #e4dacb;
+  background: #fffdf9;
+  color: #2a2420;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.calendar-day.selected {
+  border-color: #8c4a3a;
+  background: #f6ece5;
+  color: #8c4a3a;
+}
+
+.calendar-day:disabled {
+  background: #f1ede4;
+  color: #c9bda9;
+  border-color: #ece4d6;
+  cursor: not-allowed;
+}
+
+.slot-section {
+  margin-bottom: 20px;
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.slot-grid .option-btn {
+  padding: 10px;
+  justify-content: center;
+  font-size: 14px;
+}
